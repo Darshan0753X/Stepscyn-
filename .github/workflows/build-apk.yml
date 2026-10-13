@@ -31,21 +31,40 @@ jobs:
 
       - name: Align SDK and Dependencies
         run: |
-          # 1. Ensure stable Android 35 environment
-          if [ -f gradle/libs.versions.toml ]; then
-            sed -i 's/coreKtx = "1.18.0"/coreKtx = "1.15.0"/g' gradle/libs.versions.toml
-          fi
-          if [ -f app/build.gradle.kts ]; then
-            sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 35/g' app/build.gradle.kts
-            sed -i 's/targetSdk = 36/targetSdk = 35/g' app/build.gradle.kts
-          fi
+          python3 -c '
+          import re, os
 
-          # 2. Ensure missing items import is present if old WatchSyncScreen was checked out
-          if [ -f app/src/main/java/com/example/ui/screens/WatchSyncScreen.kt ]; then
-            if ! grep -q "import androidx.compose.foundation.lazy.items" app/src/main/java/com/example/ui/screens/WatchSyncScreen.kt; then
-              sed -i '/import androidx.compose.foundation.lazy.LazyColumn/a import androidx.compose.foundation.lazy.items' app/src/main/java/com/example/ui/screens/WatchSyncScreen.kt
-            fi
-          fi
+          # 1. Align libs.versions.toml to stable coreKtx 1.15.0
+          if os.path.isfile("gradle/libs.versions.toml"):
+              with open("gradle/libs.versions.toml", "r") as f:
+                  toml = f.read()
+              toml = re.sub(r"coreKtx\s*=\s*[\"0-9\.]+", "coreKtx = \"1.15.0\"", toml)
+              with open("gradle/libs.versions.toml", "w") as f:
+                  f.write(toml)
+              print("[OK] gradle/libs.versions.toml verified")
+
+          # 2. Align app/build.gradle.kts to compileSdk 35 and targetSdk 35
+          if os.path.isfile("app/build.gradle.kts"):
+              with open("app/build.gradle.kts", "r") as f:
+                  kts = f.read()
+              kts = re.sub(r"compileSdk\s*\{[^}]*\}", "compileSdk = 35", kts)
+              kts = re.sub(r"compileSdk\s*=\s*\d+", "compileSdk = 35", kts)
+              kts = re.sub(r"targetSdk\s*=\s*\d+", "targetSdk = 35", kts)
+              with open("app/build.gradle.kts", "w") as f:
+                  f.write(kts)
+              print("[OK] app/build.gradle.kts verified")
+
+          # 3. Ensure WatchSyncScreen.kt has items import
+          watch_screen = "app/src/main/java/com/example/ui/screens/WatchSyncScreen.kt"
+          if os.path.isfile(watch_screen):
+              with open(watch_screen, "r") as f:
+                  code = f.read()
+              if "import androidx.compose.foundation.lazy.items" not in code:
+                  code = code.replace("import androidx.compose.foundation.lazy.LazyColumn", "import androidx.compose.foundation.lazy.LazyColumn\nimport androidx.compose.foundation.lazy.items")
+                  with open(watch_screen, "w") as f:
+                      f.write(code)
+                  print("[OK] WatchSyncScreen.kt patched")
+          '
 
       - name: Prepare Secrets and Keystore
         run: |
@@ -58,16 +77,16 @@ jobs:
             fi
           fi
 
-          # 2. Materialize debug.keystore from repository base64
-          if [ ! -f debug.keystore ] && [ -f debug.keystore.base64 ]; then
-            base64 -d debug.keystore.base64 > debug.keystore
+          # 2. Materialize debug.keystore
+          if [ -s debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore || true
           fi
 
-          # 3. Fallback: generate standard debug keystore if not present
-          if [ ! -f debug.keystore ]; then
+          # 3. Fallback: generate standard debug keystore if missing or empty
+          if [ ! -s debug.keystore ]; then
             keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey \
               -storepass android -keypass android -keyalg RSA -keysize 2048 \
-              -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+              -validity 10000 -dname "CN=Android Debug,O=Android,C=US" -storetype PKCS12
           fi
 
       - name: Setup Gradle
@@ -78,19 +97,15 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log || {
-            echo "## ❌ Build Failed" >> $GITHUB_STEP_SUMMARY
-            echo "### Detailed Gradle Error Output:" >> $GITHUB_STEP_SUMMARY
-            echo '```text' >> $GITHUB_STEP_SUMMARY
-            grep -E "e: |FAILURE:|What went wrong:|Compilation error" build.log -A 8 -B 2 >> $GITHUB_STEP_SUMMARY || tail -n 60 build.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            exit 1
-          }
+          ./gradlew assembleDebug --no-daemon --stacktrace
+          echo "### Build Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "Generated APK files:" >> $GITHUB_STEP_SUMMARY
+          ls -la app/build/outputs/apk/debug/ >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
-        if: success()
         with:
           name: StepSync-Debug-APK
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
           retention-days: 14
