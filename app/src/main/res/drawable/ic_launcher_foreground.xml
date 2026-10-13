@@ -1,0 +1,20 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Top-Right Sync Arc with Runner Arrow in Cyber Lime -->
+    <path
+        android:fillColor="#B8FF65"
+        android:pathData="M54,28 C68.36,28 80,39.64 80,54 C80,57.2 79.4,60.27 78.33,63.1 L83.5,65.2 C85.1,61.7 86,57.9 86,54 C86,36.33 71.67,22 54,22 L54,16 L42,25 L54,34 Z" />
+
+    <!-- Bottom-Left Sync Arc with Runner Arrow in Electric Teal -->
+    <path
+        android:fillColor="#72E7D2"
+        android:pathData="M54,80 C39.64,80 28,68.36 28,54 C28,50.8 28.6,47.73 29.67,44.9 L24.5,42.8 C22.9,46.3 22,50.1 22,54 C22,71.67 36.33,86 54,86 L54,92 L66,83 L54,74 Z" />
+
+    <!-- Center Athletic Step / Lightning Accent -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M51,43 L45,55 L53,55 L51,67 L63,51 L55,51 Z" />
+</vector>

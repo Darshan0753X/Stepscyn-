@@ -1,0 +1,58 @@
+{
+  "entities": {
+    "UserProfile": {
+      "collection": "users",
+      "fields": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "username": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "dailyGoal": { "type": "number" },
+        "currentStreak": { "type": "number" },
+        "totalSteps": { "type": "number" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    },
+    "DailyStats": {
+      "collection": "users/{userId}/dailyStats",
+      "fields": {
+        "date": { "type": "string" },
+        "stepTotal": { "type": "number" },
+        "goal": { "type": "number" },
+        "sourceType": { "type": "string" },
+        "lastSyncedAt": { "type": "number" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    },
+    "Group": {
+      "collection": "groups",
+      "fields": {
+        "name": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "memberIds": { "type": "list" },
+        "inviteCode": { "type": "string" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    },
+    "Challenge": {
+      "collection": "challenges",
+      "fields": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "participantIds": { "type": "list" },
+        "challengeType": { "type": "string" },
+        "targetSteps": { "type": "number" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "status": { "type": "string" },
+        "participantSteps": { "type": "map" },
+        "createdAt": { "type": "timestamp" },
+        "updatedAt": { "type": "timestamp" }
+      }
+    }
+  }
+}

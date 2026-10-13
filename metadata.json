@@ -1,0 +1,6 @@
+{
+  "name": "StepSync",
+  "description": "Smartwatch fitness competition app with Health Connect integration, 1-on-1 duels, and shared leaderboards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
