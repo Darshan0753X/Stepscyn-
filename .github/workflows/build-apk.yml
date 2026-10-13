@@ -11,7 +11,7 @@ jobs:
   build:
     name: Build Debug APK
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
 
     steps:
       - name: Checkout Repository
@@ -23,23 +23,14 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Configure Android SDK Licenses & Platform 36
+      - name: Accept Android SDK Licenses
         run: |
-          export PATH=$ANDROID_HOME/cmdline-tools/latest/bin:$PATH
           mkdir -p "$ANDROID_HOME/licenses"
-          echo -e "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n24333f8a63b6825ea9c5514f83c2829b004d1fee" > "$ANDROID_HOME/licenses/android-sdk-license"
-          echo -e "84831b9409646a918e30573bab4c9c91346d8abd\n5046274c40de033a462dd4de9f91dd079c559799" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-          if command -v sdkmanager >/dev/null 2>&1; then
-            yes | sdkmanager --licenses || true
-            sdkmanager "platforms;android-36" || true
-          elif [ -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
-            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" || true
-          fi
+          echo -e "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e" > "$ANDROID_HOME/licenses/android-sdk-license"
 
       - name: Prepare Secrets and Keystore
         run: |
-          # 1. Create .env if missing for Secrets Gradle plugin
+          # 1. Ensure .env exists for Secrets Gradle plugin
           if [ ! -f .env ]; then
             if [ -f .env.example ]; then
               cp .env.example .env
