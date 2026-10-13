@@ -1,15 +1,16 @@
 package com.example
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
@@ -34,14 +35,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.StepsRecord
 import com.example.auth.AuthManager
 import com.example.data.repository.FitnessDataRepository
 import com.example.data.repository.SocialCompetitionRepository
@@ -56,6 +61,13 @@ import com.example.ui.theme.CyberLime
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.DarkSurface
 import com.example.ui.theme.StepSyncTheme
+import kotlinx.coroutines.launch
+
+// Health Connect Step Count Permissions Boilerplate
+val HEALTH_PERMISSIONS: Set<String> = setOf(
+    HealthPermission.getReadPermission(StepsRecord::class),
+    HealthPermission.getWritePermission(StepsRecord::class)
+)
 
 enum class Screen(val title: String, val icon: ImageVector) {
     HOME("Home", Icons.Default.DirectionsRun),
@@ -68,6 +80,15 @@ enum class Screen(val title: String, val icon: ImageVector) {
 
 class MainActivity : ComponentActivity() {
 
+    // Health Connect client reference
+    val healthConnectClient: HealthConnectClient? by lazy {
+        try {
+            HealthConnectClient.getOrCreate(applicationContext)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -77,13 +98,54 @@ class MainActivity : ComponentActivity() {
         val authManager = AuthManager(applicationContext)
 
         setContent {
+            val scope = rememberCoroutineScope()
             var isDarkTheme by remember { mutableStateOf(true) }
-            var isOnboardingCompleted by remember { mutableStateOf(true) } // Ready on launch for instant preview
+            var isOnboardingCompleted by remember { mutableStateOf(true) }
+
+            // Health Connect Permissions Boilerplate Contract Launcher
+            val requestPermissionActivityContract = PermissionController.createRequestPermissionResultContract()
+            val requestPermissionsLauncher = rememberLauncherForActivityResult(
+                contract = requestPermissionActivityContract
+            ) { grantedPermissions ->
+                if (grantedPermissions.contains(HealthPermission.getReadPermission(StepsRecord::class))) {
+                    Toast.makeText(this@MainActivity, "Health Connect permissions granted! Syncing steps...", Toast.LENGTH_SHORT).show()
+                    scope.launch {
+                        fitnessRepository.syncFromHealthConnect()
+                    }
+                } else {
+                    Toast.makeText(this@MainActivity, "Health Connect permission denied. Using demo / manual mode.", Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            // Boilerplate trigger function to check and request Health Connect permissions
+            fun requestHealthConnectPermissions() {
+                val client = healthConnectClient
+                if (client != null) {
+                    scope.launch {
+                        try {
+                            val granted = client.permissionController.getGrantedPermissions()
+                            if (granted.contains(HealthPermission.getReadPermission(StepsRecord::class))) {
+                                fitnessRepository.syncFromHealthConnect()
+                                Toast.makeText(this@MainActivity, "Health Connect permissions already active. Synced!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                requestPermissionsLauncher.launch(HEALTH_PERMISSIONS)
+                            }
+                        } catch (e: Exception) {
+                            requestPermissionsLauncher.launch(HEALTH_PERMISSIONS)
+                        }
+                    }
+                } else {
+                    Toast.makeText(this@MainActivity, "Health Connect is not available on this device/emulator. Demo Mode active.", Toast.LENGTH_LONG).show()
+                }
+            }
 
             StepSyncTheme(darkTheme = isDarkTheme) {
                 if (!isOnboardingCompleted) {
                     OnboardingScreen(
-                        onComplete = { isOnboardingCompleted = true }
+                        onComplete = {
+                            isOnboardingCompleted = true
+                            requestHealthConnectPermissions()
+                        }
                     )
                 } else {
                     StepSyncMainApp(
@@ -91,7 +153,8 @@ class MainActivity : ComponentActivity() {
                         competitionRepository = competitionRepository,
                         authManager = authManager,
                         isDarkTheme = isDarkTheme,
-                        onToggleDarkTheme = { isDarkTheme = it }
+                        onToggleDarkTheme = { isDarkTheme = it },
+                        onRequestHealthPermissions = { requestHealthConnectPermissions() }
                     )
                 }
             }
@@ -105,7 +168,8 @@ fun StepSyncMainApp(
     competitionRepository: SocialCompetitionRepository,
     authManager: AuthManager,
     isDarkTheme: Boolean,
-    onToggleDarkTheme: (Boolean) -> Unit
+    onToggleDarkTheme: (Boolean) -> Unit,
+    onRequestHealthPermissions: () -> Unit
 ) {
     var currentScreen by remember { mutableStateOf(Screen.HOME) }
 

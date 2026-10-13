@@ -2,11 +2,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Standard Network Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Health Connect Step Count Permissions Boilerplate -->
+    <!-- Required to read aggregated and raw step count records from compatible smartwatches (Samsung Galaxy Fit3, Pixel Watch, etc.) -->
     <uses-permission android:name="android.permission.health.READ_STEPS" />
+    <!-- Required to write step count records if syncing manual or companion step entries -->
     <uses-permission android:name="android.permission.health.WRITE_STEPS" />
 
+    <!-- Required package visibility declaration to detect Health Connect on Android 11+ -->
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
     </queries>
@@ -20,6 +26,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.MyApplication">
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -30,12 +37,14 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- Health Connect rationale intent filter -->
+
+            <!-- Health Connect Permissions Rationale Intent Filter (For Android 13 and below / pre-U APK) -->
             <intent-filter>
                 <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
             </intent-filter>
         </activity>
 
+        <!-- Health Connect View Permissions Usage Activity Alias (Required for Android 14+ / API 34+ system Health Connect) -->
         <activity-alias
             android:name="ViewPermissionUsageActivity"
             android:exported="true"
