@@ -31,13 +31,20 @@ jobs:
 
       - name: Align SDK and Dependencies
         run: |
-          # Ensure stable Android 35 environment even if only workflow was pushed
+          # 1. Ensure stable Android 35 environment
           if [ -f gradle/libs.versions.toml ]; then
             sed -i 's/coreKtx = "1.18.0"/coreKtx = "1.15.0"/g' gradle/libs.versions.toml
           fi
           if [ -f app/build.gradle.kts ]; then
             sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 35/g' app/build.gradle.kts
             sed -i 's/targetSdk = 36/targetSdk = 35/g' app/build.gradle.kts
+          fi
+
+          # 2. Ensure missing items import is present if old WatchSyncScreen was checked out
+          if [ -f app/src/main/java/com/example/ui/screens/WatchSyncScreen.kt ]; then
+            if ! grep -q "import androidx.compose.foundation.lazy.items" app/src/main/java/com/example/ui/screens/WatchSyncScreen.kt; then
+              sed -i '/import androidx.compose.foundation.lazy.LazyColumn/a import androidx.compose.foundation.lazy.items' app/src/main/java/com/example/ui/screens/WatchSyncScreen.kt
+            fi
           fi
 
       - name: Prepare Secrets and Keystore
@@ -70,7 +77,15 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee build.log || {
+            echo "## ❌ Build Failed" >> $GITHUB_STEP_SUMMARY
+            echo "### Detailed Gradle Error Output:" >> $GITHUB_STEP_SUMMARY
+            echo '```text' >> $GITHUB_STEP_SUMMARY
+            grep -E "e: |FAILURE:|What went wrong:|Compilation error" build.log -A 8 -B 2 >> $GITHUB_STEP_SUMMARY || tail -n 60 build.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            exit 1
+          }
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
