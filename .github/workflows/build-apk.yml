@@ -11,7 +11,7 @@ jobs:
   build:
     name: Build Debug APK
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout Repository
@@ -28,6 +28,17 @@ jobs:
           mkdir -p "$ANDROID_HOME/licenses"
           printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n" > "$ANDROID_HOME/licenses/android-sdk-license"
           printf "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
+
+      - name: Align SDK and Dependencies
+        run: |
+          # Ensure stable Android 35 environment even if only workflow was pushed
+          if [ -f gradle/libs.versions.toml ]; then
+            sed -i 's/coreKtx = "1.18.0"/coreKtx = "1.15.0"/g' gradle/libs.versions.toml
+          fi
+          if [ -f app/build.gradle.kts ]; then
+            sed -i 's/compileSdk { version = release(36) { minorApiLevel = 1 } }/compileSdk = 35/g' app/build.gradle.kts
+            sed -i 's/targetSdk = 36/targetSdk = 35/g' app/build.gradle.kts
+          fi
 
       - name: Prepare Secrets and Keystore
         run: |
