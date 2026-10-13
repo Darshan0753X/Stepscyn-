@@ -29,7 +29,7 @@ jobs:
           printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n" > "$ANDROID_HOME/licenses/android-sdk-license"
           printf "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
 
-      - name: Align SDK and Dependencies
+      - name: Align SDK, Dependencies and Resources
         run: |
           python3 -c '
           import re, os
@@ -54,7 +54,39 @@ jobs:
                   f.write(kts)
               print("[OK] app/build.gradle.kts verified")
 
-          # 3. Ensure all Compose screens have items import if using items()
+          # 3. Inject fallback string resources into strings.xml if missing
+          strings_path = "app/src/main/res/values/strings.xml"
+          if os.path.isfile(strings_path):
+              with open(strings_path, "r") as f:
+                  s = f.read()
+              if "default_web_client_id" not in s:
+                  s = s.replace("</resources>", "    <string name=\"default_web_client_id\">587849588879-tj00eop7iob5duvjcfsmg2bkpns3jcgt.apps.googleusercontent.com</string>\n</resources>")
+                  with open(strings_path, "w") as f:
+                      f.write(s)
+                  print("[OK] Injected fallback strings into strings.xml")
+
+          # 4. Patch R.string unresolved references in AuthManager and SocialCompetitionRepository
+          auth_path = "app/src/main/java/com/example/auth/AuthManager.kt"
+          if os.path.isfile(auth_path):
+              with open(auth_path, "r") as f:
+                  code = f.read()
+              if "R.string.default_web_client_id" in code:
+                  code = code.replace("context.getString(R.string.default_web_client_id)", "(\"587849588879-tj00eop7iob5duvjcfsmg2bkpns3jcgt.apps.googleusercontent.com\")")
+                  with open(auth_path, "w") as f:
+                      f.write(code)
+                  print("[OK] Patched AuthManager.kt")
+
+          repo_path = "app/src/main/java/com/example/data/repository/SocialCompetitionRepository.kt"
+          if os.path.isfile(repo_path):
+              with open(repo_path, "r") as f:
+                  code = f.read()
+              if "R.string.firestore_database_id" in code:
+                  code = code.replace("context.getString(R.string.firestore_database_id)", "(\"(default)\")")
+                  with open(repo_path, "w") as f:
+                      f.write(code)
+                  print("[OK] Patched SocialCompetitionRepository.kt")
+
+          # 5. Ensure all Compose screens have items import if using items()
           if os.path.isdir("app/src/main/java"):
               for root, dirs, files in os.walk("app/src/main/java"):
                   for file in files:

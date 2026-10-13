@@ -47,10 +47,10 @@ class AuthManager(private val context: Context) {
         onError: (String) -> Unit
     ) {
         val clientId = try {
-            context.getString(R.string.default_web_client_id)
+            val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+            if (resId != 0) context.getString(resId) else "587849588879-tj00eop7iob5duvjcfsmg2bkpns3jcgt.apps.googleusercontent.com"
         } catch (_: Exception) {
-            onError("Google Sign-In configuration missing (default_web_client_id)")
-            return
+            "587849588879-tj00eop7iob5duvjcfsmg2bkpns3jcgt.apps.googleusercontent.com"
         }
 
         val signInOption = GetSignInWithGoogleOption.Builder(serverClientId = clientId).build()

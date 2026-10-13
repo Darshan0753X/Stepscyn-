@@ -27,8 +27,12 @@ class SocialCompetitionRepository(private val context: Context) {
 
     private val firestore: FirebaseFirestore by lazy {
         try {
-            val dbId = context.getString(R.string.firestore_database_id)
-            FirebaseFirestore.getInstance(dbId)
+            val resId = context.resources.getIdentifier("firestore_database_id", "string", context.packageName)
+            if (resId != 0) {
+                FirebaseFirestore.getInstance(context.getString(resId))
+            } else {
+                FirebaseFirestore.getInstance()
+            }
         } catch (_: Exception) {
             FirebaseFirestore.getInstance()
         }
