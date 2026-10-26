@@ -19,3 +19,4 @@ debug.keystore
 *-debug.log
 .build-outputs/
 *.zip
+release_artifacts/

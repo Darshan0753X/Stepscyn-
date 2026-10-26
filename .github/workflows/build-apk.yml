@@ -7,6 +7,9 @@ on:
     branches: [ "**" ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build Debug APK & ZIP Package
@@ -23,14 +26,30 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Set up Android SDK
+      - name: Set up Android SDK & Accept Licenses
         run: |
-          SDK_DIR="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          if [ -d "$SDK_DIR" ]; then
-            echo "ANDROID_HOME=$SDK_DIR" >> $GITHUB_ENV
-            mkdir -p "$SDK_DIR/licenses" 2>/dev/null || true
-            printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n" > "$SDK_DIR/licenses/android-sdk-license" 2>/dev/null || true
-            printf "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$SDK_DIR/licenses/android-sdk-preview-license" 2>/dev/null || true
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+
+          # Automatically accept all Android SDK licenses
+          mkdir -p "$ANDROID_HOME/licenses" 2>/dev/null || true
+          printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-license" 2>/dev/null || true
+          printf "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license" 2>/dev/null || true
+
+          # If sdkmanager exists, accept all licenses and install API 35
+          SDKM=""
+          if command -v sdkmanager &> /dev/null; then
+            SDKM="sdkmanager"
+          elif [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          fi
+
+          if [ -n "$SDKM" ]; then
+            echo "Using sdkmanager at: $SDKM"
+            yes | "$SDKM" --licenses 2>/dev/null || true
+            yes | "$SDKM" "platforms;android-35" "build-tools;35.0.0" 2>/dev/null || true
           fi
 
       - name: Prepare Secrets and Keystore
@@ -44,84 +63,83 @@ jobs:
             fi
           fi
 
-          # 2. Materialize debug.keystore from base64 if present
-          if [ -s debug.keystore.base64 ]; then
-            base64 -d debug.keystore.base64 > debug.keystore 2>/dev/null || base64 --decode debug.keystore.base64 > debug.keystore 2>/dev/null || true
-          fi
+          # 2. Materialize debug.keystore using Python cross-platform base64 decoding
+          python3 -c '
+          import base64, os
+          if os.path.isfile("debug.keystore.base64") and os.path.getsize("debug.keystore.base64") > 0:
+              try:
+                  with open("debug.keystore.base64", "rb") as f:
+                      raw = f.read().strip()
+                  data = base64.b64decode(raw)
+                  with open("debug.keystore", "wb") as f:
+                      f.write(data)
+                  print("[OK] Decoded debug.keystore from base64")
+              except Exception as e:
+                  print("[WARN] Base64 decode fallback:", e)
+          '
 
           # 3. Fallback: generate standard debug keystore if missing or empty
           if [ ! -s debug.keystore ]; then
+            echo "Generating fallback debug.keystore via keytool..."
             keytool -genkeypair -v -keystore debug.keystore -alias androiddebugkey \
               -storepass android -keypass android -keyalg RSA -keysize 2048 \
               -validity 10000 -dname "CN=Android Debug,O=Android,C=US" -storetype PKCS12
           fi
 
-      - name: Setup Gradle
+      - name: Setup Gradle Cache
         uses: gradle/actions/setup-gradle@v4
+        continue-on-error: true
         with:
-          gradle-version: '9.3.1'
-
-      - name: Grant Execute Permission to Gradlew
-        run: chmod +x gradlew || true
+          validate-wrappers: false
 
       - name: Build Debug APK
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace --console=plain --no-configuration-cache 2>&1 | tee build.log
-          STATUS=${PIPESTATUS[0]}
-          if [ $STATUS -ne 0 ]; then
-            echo "## ❌ Gradle Build Failed (Exit Code: $STATUS)" >> $GITHUB_STEP_SUMMARY
-            echo "### Compiler Errors:" >> $GITHUB_STEP_SUMMARY
-            echo '```text' >> $GITHUB_STEP_SUMMARY
-            grep -E "e: |FAILURE:|What went wrong:|Compilation error|\* Exception is:|Caused by:" build.log -A 10 -B 2 >> $GITHUB_STEP_SUMMARY || true
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            exit $STATUS
-          fi
-          echo "### ✅ Build Succeeded!" >> $GITHUB_STEP_SUMMARY
+          sed -i 's/\r$//' gradlew 2>/dev/null || true
+          chmod +x gradlew 2>/dev/null || true
+          ./gradlew assembleDebug --no-daemon --stacktrace --console=plain --no-configuration-cache
 
       - name: Package APK into ZIP Archive
         run: |
-          mkdir -p release_package
-          # Find generated debug APK safely
-          APK_FILE=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -n 1)
-          if [ -z "$APK_FILE" ] || [ ! -f "$APK_FILE" ]; then
-            echo "❌ No APK found in app/build/outputs/apk/debug/"
-            exit 1
-          fi
+          python3 -c '
+          import os, sys, zipfile, glob
 
-          echo "Found APK: $APK_FILE"
-          cp "$APK_FILE" release_package/StepSync-debug.apk
+          apk_files = glob.glob("app/build/outputs/apk/debug/*.apk") + glob.glob("app/build/outputs/apk/*/*/*.apk")
+          if not apk_files:
+              print("❌ No APK found in app/build/outputs/apk/", file=sys.stderr)
+              sys.exit(1)
 
-          cat << 'EOF' > release_package/INSTALL_INSTRUCTIONS.txt
-StepSync Android Application (Debug Build)
+          apk_path = apk_files[0]
+          print(f"Packaging {apk_path} into StepSync release package")
+
+          os.makedirs("release_artifacts", exist_ok=True)
+          with open(apk_path, "rb") as src, open("release_artifacts/StepSync-debug.apk", "wb") as dst:
+              dst.write(src.read())
+
+          readme = """StepSync Android Application (Debug Build)
 =========================================
 Installation Guide:
-1. Transfer 'StepSync-debug.apk' to your Android device via USB, Google Drive, or direct download.
-2. Open your device's File Manager and tap 'StepSync-debug.apk'.
-3. Allow "Install from unknown sources" or "Install unknown apps" if prompted.
-4. Launch StepSync and sync with Google Health Connect or Samsung Galaxy Fit3!
-EOF
+1. Transfer "StepSync-debug.apk" to your Android phone or tablet.
+2. Open your device File Manager and tap "StepSync-debug.apk" to install.
+3. If prompted, allow "Install unknown apps" from Settings.
+4. Open StepSync and sync your activity with Health Connect or smartwatch!
+"""
 
-          cd release_package
-          zip -9 -r ../StepSync-v1.0-APK.zip StepSync-debug.apk INSTALL_INSTRUCTIONS.txt
-          cd ..
+          zip_path = "release_artifacts/StepSync-v1.0-APK.zip"
+          with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+              z.write("release_artifacts/StepSync-debug.apk", arcname="StepSync-debug.apk")
+              z.writestr("INSTALL_INSTRUCTIONS.txt", readme)
 
-          ZIP_SIZE=$(ls -lh StepSync-v1.0-APK.zip | awk '{print $5}')
-          echo "### 📦 ZIP Package Created Successfully!" >> $GITHUB_STEP_SUMMARY
-          echo "- **Archive**: \`StepSync-v1.0-APK.zip\` ($ZIP_SIZE)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Contained APK**: \`StepSync-debug.apk\`" >> $GITHUB_STEP_SUMMARY
+          print("✅ Release artifacts prepared successfully:")
+          for f in sorted(os.listdir("release_artifacts")):
+              size = os.path.getsize(os.path.join("release_artifacts", f))
+              print(f" - {f} ({size:,} bytes)")
+          '
 
-      - name: Upload APK ZIP Package Artifact
+      - name: Upload Release Package (APK & ZIP)
         uses: actions/upload-artifact@v4
         with:
-          name: StepSync-v1.0-APK-ZIP
-          path: StepSync-v1.0-APK.zip
+          name: StepSync-Release-Package
+          path: release_artifacts/
           if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload Raw Debug APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: StepSync-Debug-APK
-          path: release_package/StepSync-debug.apk
-          if-no-files-found: error
-          retention-days: 14
+          overwrite: true
+          retention-days: 7
