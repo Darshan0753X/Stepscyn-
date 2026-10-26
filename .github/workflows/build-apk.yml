@@ -100,9 +100,83 @@ jobs:
                                   r"\1\nimport androidx.compose.foundation.lazy.items",
                                   content
                               )
-                              with open(fpath, "w") as f:
-                                  f.write(content)
-                              print(f"[OK] Added items import to {file}")
+          # 6. Ensure StepSyncApplication and FirebaseHelper exist and manifest is registered
+          helper_path = "app/src/main/java/com/example/auth/FirebaseHelper.kt"
+          if not os.path.isfile(helper_path):
+              os.makedirs("app/src/main/java/com/example/auth", exist_ok=True)
+              with open(helper_path, "w") as f:
+                  f.write('''package com.example.auth
+
+import android.content.Context
+import android.util.Log
+import com.google.firebase.FirebaseApp
+import com.google.firebase.FirebaseOptions
+
+object FirebaseHelper {
+    @Volatile
+    private var initialized = false
+
+    fun initialize(context: Context) {
+        if (initialized) return
+        synchronized(this) {
+            if (initialized) return
+            try {
+                val appContext = context.applicationContext ?: context
+                if (FirebaseApp.getApps(appContext).isEmpty()) {
+                    try { FirebaseApp.initializeApp(appContext) } catch (_: Exception) {}
+                    if (FirebaseApp.getApps(appContext).isEmpty()) {
+                        val options = FirebaseOptions.Builder()
+                            .setApplicationId("1:587849588879:android:8143c38392b0e52f4c50fa")
+                            .setProjectId("gen-lang-client-0275946414")
+                            .setApiKey("AIzaSyAubabzAITvDiUkeUpQrs6htoDmOm2ImNk")
+                            .setStorageBucket("gen-lang-client-0275946414.firebasestorage.app")
+                            .setGcmSenderId("587849588879")
+                            .build()
+                        FirebaseApp.initializeApp(appContext, options)
+                    }
+                }
+                initialized = true
+            } catch (e: Exception) {
+                Log.e("FirebaseHelper", "Init error: ${e.message}")
+            }
+        }
+    }
+}
+''')
+              print("[OK] Verified FirebaseHelper.kt")
+
+          app_class = "app/src/main/java/com/example/StepSyncApplication.kt"
+          if not os.path.isfile(app_class):
+              with open(app_class, "w") as f:
+                  f.write('''package com.example
+
+import android.app.Application
+import android.util.Log
+import com.example.auth.FirebaseHelper
+
+class StepSyncApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        try {
+            FirebaseHelper.initialize(this)
+            Log.i("StepSyncApplication", "Firebase initialized at launch")
+        } catch (e: Exception) {
+            Log.e("StepSyncApplication", "Init failed: ${e.message}")
+        }
+    }
+}
+''')
+              print("[OK] Verified StepSyncApplication.kt")
+
+          manifest_file = "app/src/main/AndroidManifest.xml"
+          if os.path.isfile(manifest_file):
+              with open(manifest_file, "r") as f:
+                  mf = f.read()
+              if 'android:name=".StepSyncApplication"' not in mf:
+                  mf = mf.replace("<application", '<application\\n        android:name=".StepSyncApplication"')
+                  with open(manifest_file, "w") as f:
+                      f.write(mf)
+                  print("[OK] Registered StepSyncApplication in manifest")
           '
 
       - name: Prepare Secrets and Keystore

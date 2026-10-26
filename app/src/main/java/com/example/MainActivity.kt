@@ -18,10 +18,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.DirectionsRun
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.Icon
@@ -52,10 +54,12 @@ import com.example.data.repository.FitnessDataRepository
 import com.example.data.repository.SocialCompetitionRepository
 import com.example.ui.screens.ChallengesScreen
 import com.example.ui.screens.FriendsScreen
+import com.example.ui.screens.GoalProgressScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.LeaderboardScreen
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.ProfileScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.WatchSyncScreen
 import com.example.ui.theme.CyberLime
 import com.example.ui.theme.DarkBg
@@ -71,11 +75,13 @@ val HEALTH_PERMISSIONS: Set<String> = setOf(
 
 enum class Screen(val title: String, val icon: ImageVector) {
     HOME("Home", Icons.Default.DirectionsRun),
+    GOAL_PROGRESS("Goal", Icons.Default.Adjust),
     CHALLENGES("Challenges", Icons.Default.SportsScore),
     LEADERBOARD("Board", Icons.Default.EmojiEvents),
     FRIENDS("Friends", Icons.Default.Group),
     WATCH_SYNC("Watch", Icons.Default.Watch),
-    PROFILE("Profile", Icons.Default.Person)
+    PROFILE("Profile", Icons.Default.Person),
+    SETTINGS("Settings", Icons.Default.Settings)
 }
 
 class MainActivity : ComponentActivity() {
@@ -91,51 +97,53 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            com.example.auth.FirebaseHelper.initialize(applicationContext)
+        } catch (_: Exception) {}
         enableEdgeToEdge()
 
         val fitnessRepository = FitnessDataRepository(applicationContext)
         val competitionRepository = SocialCompetitionRepository(applicationContext)
         val authManager = AuthManager(applicationContext)
+        val healthConnectSyncService = com.example.health.HealthConnectSyncService(applicationContext, fitnessRepository, competitionRepository)
+
+        // Launch periodic background sync
+        healthConnectSyncService.startBackgroundSync()
 
         setContent {
             val scope = rememberCoroutineScope()
             var isDarkTheme by remember { mutableStateOf(true) }
             var isOnboardingCompleted by remember { mutableStateOf(true) }
 
-            // Health Connect Permissions Boilerplate Contract Launcher
-            val requestPermissionActivityContract = PermissionController.createRequestPermissionResultContract()
+            // Health Connect Permissions Contract Launcher
             val requestPermissionsLauncher = rememberLauncherForActivityResult(
-                contract = requestPermissionActivityContract
+                contract = PermissionController.createRequestPermissionResultContract()
             ) { grantedPermissions ->
                 if (grantedPermissions.contains(HealthPermission.getReadPermission(StepsRecord::class))) {
                     Toast.makeText(this@MainActivity, "Health Connect permissions granted! Syncing steps...", Toast.LENGTH_SHORT).show()
                     scope.launch {
-                        fitnessRepository.syncFromHealthConnect()
+                        healthConnectSyncService.syncUserActivity()
                     }
                 } else {
                     Toast.makeText(this@MainActivity, "Health Connect permission denied. Using demo / manual mode.", Toast.LENGTH_SHORT).show()
                 }
             }
 
-            // Boilerplate trigger function to check and request Health Connect permissions
+            // Trigger function to check and request Health Connect permissions
             fun requestHealthConnectPermissions() {
-                val client = healthConnectClient
-                if (client != null) {
-                    scope.launch {
-                        try {
-                            val granted = client.permissionController.getGrantedPermissions()
-                            if (granted.contains(HealthPermission.getReadPermission(StepsRecord::class))) {
-                                fitnessRepository.syncFromHealthConnect()
-                                Toast.makeText(this@MainActivity, "Health Connect permissions already active. Synced!", Toast.LENGTH_SHORT).show()
-                            } else {
-                                requestPermissionsLauncher.launch(HEALTH_PERMISSIONS)
-                            }
-                        } catch (e: Exception) {
-                            requestPermissionsLauncher.launch(HEALTH_PERMISSIONS)
-                        }
+                scope.launch {
+                    val availability = healthConnectSyncService.checkSdkAvailability()
+                    if (availability != com.example.health.HealthConnectManager.AvailabilityStatus.AVAILABLE) {
+                        Toast.makeText(this@MainActivity, "Health Connect is not available on this device/emulator. Demo Mode active.", Toast.LENGTH_LONG).show()
+                        return@launch
                     }
-                } else {
-                    Toast.makeText(this@MainActivity, "Health Connect is not available on this device/emulator. Demo Mode active.", Toast.LENGTH_LONG).show()
+
+                    if (healthConnectSyncService.hasRequiredPermissions()) {
+                        val ok = healthConnectSyncService.syncUserActivity()
+                        Toast.makeText(this@MainActivity, if (ok) "Health Connect steps synced!" else "Health Connect sync completed.", Toast.LENGTH_SHORT).show()
+                    } else {
+                        requestPermissionsLauncher.launch(healthConnectSyncService.requiredPermissions)
+                    }
                 }
             }
 
@@ -152,6 +160,7 @@ class MainActivity : ComponentActivity() {
                         fitnessRepository = fitnessRepository,
                         competitionRepository = competitionRepository,
                         authManager = authManager,
+                        healthConnectSyncService = healthConnectSyncService,
                         isDarkTheme = isDarkTheme,
                         onToggleDarkTheme = { isDarkTheme = it },
                         onRequestHealthPermissions = { requestHealthConnectPermissions() }
@@ -167,6 +176,7 @@ fun StepSyncMainApp(
     fitnessRepository: FitnessDataRepository,
     competitionRepository: SocialCompetitionRepository,
     authManager: AuthManager,
+    healthConnectSyncService: com.example.health.HealthConnectSyncService? = null,
     isDarkTheme: Boolean,
     onToggleDarkTheme: (Boolean) -> Unit,
     onRequestHealthPermissions: () -> Unit
@@ -182,9 +192,9 @@ fun StepSyncMainApp(
 
     val bottomNavScreens = listOf(
         Screen.HOME,
+        Screen.GOAL_PROGRESS,
         Screen.CHALLENGES,
         Screen.LEADERBOARD,
-        Screen.FRIENDS,
         Screen.WATCH_SYNC
     )
 
@@ -243,9 +253,19 @@ fun StepSyncMainApp(
                 Screen.HOME -> HomeScreen(
                     fitnessRepository = fitnessRepository,
                     competitionRepository = competitionRepository,
+                    healthConnectSyncService = healthConnectSyncService,
                     onNavigateToChallenges = { currentScreen = Screen.CHALLENGES },
                     onNavigateToWatchSync = { currentScreen = Screen.WATCH_SYNC },
-                    onNavigateToProfile = { currentScreen = Screen.PROFILE }
+                    onNavigateToProfile = { currentScreen = Screen.PROFILE },
+                    onNavigateToGoalProgress = { currentScreen = Screen.GOAL_PROGRESS },
+                    onNavigateToSettings = { currentScreen = Screen.SETTINGS }
+                )
+                Screen.GOAL_PROGRESS -> GoalProgressScreen(
+                    fitnessRepository = fitnessRepository,
+                    competitionRepository = competitionRepository,
+                    healthConnectSyncService = healthConnectSyncService,
+                    onNavigateBack = { currentScreen = Screen.HOME },
+                    onNavigateToSettings = { currentScreen = Screen.SETTINGS }
                 )
                 Screen.CHALLENGES -> ChallengesScreen(
                     competitionRepository = competitionRepository
@@ -259,14 +279,21 @@ fun StepSyncMainApp(
                 )
                 Screen.WATCH_SYNC -> WatchSyncScreen(
                     fitnessRepository = fitnessRepository,
-                    competitionRepository = competitionRepository
+                    competitionRepository = competitionRepository,
+                    healthConnectSyncService = healthConnectSyncService
                 )
                 Screen.PROFILE -> ProfileScreen(
                     competitionRepository = competitionRepository,
                     fitnessRepository = fitnessRepository,
                     authManager = authManager,
                     isDarkTheme = isDarkTheme,
-                    onToggleDarkTheme = onToggleDarkTheme
+                    onToggleDarkTheme = onToggleDarkTheme,
+                    onNavigateToSettings = { currentScreen = Screen.SETTINGS }
+                )
+                Screen.SETTINGS -> SettingsScreen(
+                    fitnessRepository = fitnessRepository,
+                    healthConnectSyncService = healthConnectSyncService,
+                    onNavigateBack = { currentScreen = Screen.HOME }
                 )
             }
         }

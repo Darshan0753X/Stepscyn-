@@ -62,10 +62,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.health.connect.client.PermissionController
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.CircularProgressIndicator
 import com.example.data.model.StepSource
 import com.example.data.repository.FitnessDataRepository
 import com.example.data.repository.SocialCompetitionRepository
 import com.example.health.HealthConnectManager
+import com.example.health.HealthConnectSyncService
+import com.example.health.HealthSyncState
+import com.example.health.StepSyncService
 import com.example.ui.theme.CyberLime
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.DarkBorder
@@ -83,6 +88,7 @@ import java.util.Locale
 fun WatchSyncScreen(
     fitnessRepository: FitnessDataRepository,
     competitionRepository: SocialCompetitionRepository,
+    healthConnectSyncService: HealthConnectSyncService? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -90,6 +96,9 @@ fun WatchSyncScreen(
     val syncStatus by fitnessRepository.syncStatus.collectAsState()
     val isDemoMode by fitnessRepository.isDemoMode.collectAsState()
     val todayRecord by fitnessRepository.todayRecord.collectAsState()
+
+    val healthSyncState by (healthConnectSyncService?.syncState)?.collectAsState()
+        ?: remember { mutableStateOf(HealthSyncState.Idle(System.currentTimeMillis())) }
 
     var showManualLogDialog by remember { mutableStateOf(false) }
     var hasHealthPermissions by remember { mutableStateOf(false) }
@@ -99,17 +108,26 @@ fun WatchSyncScreen(
         contract = PermissionController.createRequestPermissionResultContract()
     ) { granted ->
         scope.launch {
-            hasHealthPermissions = fitnessRepository.healthConnectManager.hasAllPermissions()
+            val perms = healthConnectSyncService?.hasRequiredPermissions() 
+                ?: fitnessRepository.healthConnectManager.hasAllPermissions()
+            hasHealthPermissions = perms
             if (hasHealthPermissions) {
-                fitnessRepository.syncFromHealthConnect()
-                Toast.makeText(context, "Health Connect permissions granted & synced!", Toast.LENGTH_SHORT).show()
+                if (healthConnectSyncService != null) {
+                    healthConnectSyncService.syncUserActivity()
+                } else {
+                    fitnessRepository.syncFromHealthConnect()
+                }
+                Toast.makeText(context, "Health Connect permissions granted & steps synced!", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(context, "Permissions not granted. You can use manual logging or Demo Mode.", Toast.LENGTH_LONG).show()
             }
         }
     }
 
-    val availability = remember { fitnessRepository.healthConnectManager.checkAvailability() }
+    val availability = remember {
+        healthConnectSyncService?.checkSdkAvailability()
+            ?: fitnessRepository.healthConnectManager.checkAvailability()
+    }
 
     Scaffold(
         topBar = {
@@ -196,11 +214,121 @@ fun WatchSyncScreen(
                         Spacer(modifier = Modifier.height(12.dp))
 
                         Text(
-                            text = "StepSync uses Android's official Health Connect SDK to read aggregated step data from compatible smartwatches without double-counting records.",
+                            text = "StepSync uses Android's official Health Connect API to securely read and aggregate step counts from connected smartwatches and wearable trackers.",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Real-time Service Sync State Banner
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(DarkBg, RoundedCornerShape(12.dp))
+                                .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            when (val state = healthSyncState) {
+                                is HealthSyncState.Syncing -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(16.dp),
+                                            color = CyberLime,
+                                            strokeWidth = 2.dp
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Syncing step count with Health Connect...",
+                                            style = MaterialTheme.typography.bodySmall.copy(color = CyberLime)
+                                        )
+                                    }
+                                }
+                                is HealthSyncState.Success -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = MintSuccess,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(state.lastSyncedAt))
+                                        Text(
+                                            text = "Synced: ${state.stepCount} steps ($timeStr)",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MintSuccess,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        )
+                                    }
+                                }
+                                is HealthSyncState.PermissionRequired -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = SolarAmber,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Permission required: Tap 'Permissions' to grant access",
+                                            style = MaterialTheme.typography.bodySmall.copy(color = SolarAmber)
+                                        )
+                                    }
+                                }
+                                is HealthSyncState.HealthConnectUnavailable -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = SolarAmber,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = state.reason,
+                                            style = MaterialTheme.typography.bodySmall.copy(color = SolarAmber)
+                                        )
+                                    }
+                                }
+                                is HealthSyncState.Error -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "Sync error: ${state.message}",
+                                            style = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.error)
+                                        )
+                                    }
+                                }
+                                is HealthSyncState.Idle -> {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.Sync,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        val timeStr = SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(state.lastSyncedAt))
+                                        Text(
+                                            text = "Health Connect sync ready. Last active: $timeStr",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
@@ -210,12 +338,9 @@ fun WatchSyncScreen(
                         ) {
                             Button(
                                 onClick = {
-                                    val client = fitnessRepository.healthConnectManager.healthConnectClient
-                                    if (client != null) {
-                                        permissionLauncher.launch(fitnessRepository.healthConnectManager.permissions)
-                                    } else {
-                                        Toast.makeText(context, "Health Connect is unavailable on this environment. Demo mode active.", Toast.LENGTH_LONG).show()
-                                    }
+                                    val perms = healthConnectSyncService?.requiredPermissions
+                                        ?: fitnessRepository.healthConnectManager.permissions
+                                    permissionLauncher.launch(perms)
                                 },
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(
@@ -238,11 +363,15 @@ fun WatchSyncScreen(
                             OutlinedButton(
                                 onClick = {
                                     scope.launch {
-                                        val ok = fitnessRepository.syncFromHealthConnect()
-                                        if (ok) {
-                                            Toast.makeText(context, "Sync complete!", Toast.LENGTH_SHORT).show()
+                                        val ok = if (healthConnectSyncService != null) {
+                                            healthConnectSyncService.syncUserActivity()
                                         } else {
-                                            Toast.makeText(context, "Sync attempt finished. Source: ${syncStatus.source.name}", Toast.LENGTH_SHORT).show()
+                                            fitnessRepository.syncFromHealthConnect()
+                                        }
+                                        if (ok) {
+                                            Toast.makeText(context, "Health Connect sync complete!", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            Toast.makeText(context, "Sync checked: ${syncStatus.source.name}", Toast.LENGTH_SHORT).show()
                                         }
                                     }
                                 },
@@ -261,6 +390,30 @@ fun WatchSyncScreen(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Sync Now", fontWeight = FontWeight.Bold)
                             }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Android Background Service trigger button
+                        OutlinedButton(
+                            onClick = {
+                                StepSyncService.startSync(context)
+                                Toast.makeText(context, "StepSync Android background service dispatched!", Toast.LENGTH_SHORT).show()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = CyberLime),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, CyberLime.copy(alpha = 0.5f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("trigger_background_service_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Dispatch Android Background Sync Service", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

@@ -21,8 +21,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.material.icons.filled.Adjust
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Watch
 import androidx.compose.material3.Button
@@ -37,12 +41,14 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -58,6 +64,7 @@ import com.example.ui.components.ActivityBarChart
 import com.example.ui.components.CircularStepRing
 import com.example.ui.components.HeadToHeadCard
 import com.example.ui.components.WatchStatusCard
+import com.example.ui.components.WeeklyStepBarChart
 import com.example.ui.theme.CyberLime
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.DarkBorder
@@ -74,17 +81,22 @@ import java.util.Locale
 fun HomeScreen(
     fitnessRepository: FitnessDataRepository,
     competitionRepository: SocialCompetitionRepository,
+    healthConnectSyncService: com.example.health.HealthConnectSyncService? = null,
     onNavigateToChallenges: () -> Unit,
     onNavigateToWatchSync: () -> Unit,
     onNavigateToProfile: () -> Unit,
+    onNavigateToGoalProgress: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val todayRecord by fitnessRepository.todayRecord.collectAsState()
+    val recentDays by fitnessRepository.recentDays.collectAsState()
     val syncStatus by fitnessRepository.syncStatus.collectAsState()
     val isDemoMode by fitnessRepository.isDemoMode.collectAsState()
     val userProfile by competitionRepository.currentUserProfile.collectAsState()
     val challenges by competitionRepository.challenges.collectAsState()
     val rival = competitionRepository.friends.value.firstOrNull()
+    val syncState by (healthConnectSyncService?.syncState?.collectAsState() ?: remember { mutableStateOf(null) })
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -115,6 +127,25 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    IconButton(
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier.testTag("home_settings_button")
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(DarkSurfaceElevated, CircleShape)
+                                .border(1.dp, DarkBorder, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = CyberLime,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = onNavigateToProfile,
                         modifier = Modifier.testTag("home_profile_button")
@@ -156,7 +187,11 @@ fun HomeScreen(
                 syncStatus = syncStatus,
                 onSyncClicked = {
                     scope.launch {
-                        val success = fitnessRepository.syncFromHealthConnect()
+                        val success = if (healthConnectSyncService != null) {
+                            healthConnectSyncService.syncUserActivity()
+                        } else {
+                            fitnessRepository.syncFromHealthConnect()
+                        }
                         if (success) {
                             snackbarHostState.showSnackbar("Steps synced successfully from Health Connect!")
                         } else {
@@ -169,12 +204,51 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Main Hero Circular Progress Ring
-            CircularStepRing(
-                currentSteps = todayRecord.stepCount,
-                goal = todayRecord.goal,
-                streak = userProfile.currentStreak
-            )
+            // Main Hero Circular Progress Ring (Tappable to view detailed progress indicators)
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(24.dp))
+                    .clickable { onNavigateToGoalProgress() }
+                    .padding(4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularStepRing(
+                    currentSteps = todayRecord.stepCount,
+                    goal = todayRecord.goal,
+                    streak = userProfile.currentStreak
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Direct shortcut to the new Goal & Progress screen
+            Surface(
+                onClick = onNavigateToGoalProgress,
+                shape = RoundedCornerShape(20.dp),
+                color = DarkSurfaceElevated,
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyberLime.copy(alpha = 0.5f)),
+                modifier = Modifier.testTag("home_goal_progress_shortcut")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Adjust,
+                        contentDescription = null,
+                        tint = CyberLime,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Goal Analysis (Circle & Linear)",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            color = CyberLime,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -246,6 +320,20 @@ fun HomeScreen(
                     isDemoData = isDemoMode
                 )
             }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Weekly Step History (Health Connect 7-Day Chart)
+            WeeklyStepBarChart(
+                weeklyRecords = recentDays,
+                targetGoal = todayRecord.goal,
+                isSyncing = syncState is com.example.health.HealthSyncState.Syncing,
+                onSyncRequested = {
+                    scope.launch {
+                        healthConnectSyncService?.syncUserActivity()
+                    }
+                }
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 

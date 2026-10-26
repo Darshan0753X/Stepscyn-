@@ -23,10 +23,18 @@ import kotlinx.coroutines.launch
 class SocialCompetitionRepository(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.IO)
-    private val auth = Firebase.auth
-
-    private val firestore: FirebaseFirestore by lazy {
+    private val auth by lazy {
         try {
+            com.example.auth.FirebaseHelper.initialize(context)
+            Firebase.auth
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private val firestore: FirebaseFirestore? by lazy {
+        try {
+            com.example.auth.FirebaseHelper.initialize(context)
             val resId = context.resources.getIdentifier("firestore_database_id", "string", context.packageName)
             if (resId != 0) {
                 FirebaseFirestore.getInstance(context.getString(resId))
@@ -34,7 +42,7 @@ class SocialCompetitionRepository(private val context: Context) {
                 FirebaseFirestore.getInstance()
             }
         } catch (_: Exception) {
-            FirebaseFirestore.getInstance()
+            null
         }
     }
 
@@ -211,11 +219,12 @@ class SocialCompetitionRepository(private val context: Context) {
         _currentUserProfile.value = updated
 
         // Sync to cloud if user is signed in with Google
-        val currentUid = auth.currentUser?.uid
-        if (currentUid != null) {
+        val currentUid = auth?.currentUser?.uid
+        val fs = firestore
+        if (currentUid != null && fs != null) {
             scope.launch {
                 try {
-                    firestore.collection("users").document(currentUid).set(
+                    fs.collection("users").document(currentUid).set(
                         mapOf(
                             "userId" to currentUid,
                             "displayName" to displayName,

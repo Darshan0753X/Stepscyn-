@@ -87,6 +87,69 @@ class StepSyncLogicTest {
         assertEquals(5000L, sorted[0].second)
         assertEquals(5000L, sorted[1].second)
         assertEquals(4200L, sorted[2].second)
-        assertEquals(800L, sorted[0].second - sorted[2].second)
+    }
+
+    @Test
+    fun testGoalMilestones() {
+        val goal = 8000L
+        val currentSteps = 6000L
+        val progressRatio = currentSteps.toFloat() / goal.toFloat()
+
+        assertEquals(0.75f, progressRatio, 0.001f)
+        val percentage = (progressRatio * 100f).toInt()
+        assertEquals(75, percentage)
+
+        val milestone25 = currentSteps >= (goal * 0.25)
+        val milestone50 = currentSteps >= (goal * 0.50)
+        val milestone75 = currentSteps >= (goal * 0.75)
+        val milestone100 = currentSteps >= goal
+
+        assertTrue(milestone25)
+        assertTrue(milestone50)
+        assertTrue(milestone75)
+        assertFalse(milestone100)
+    }
+
+    @Test
+    fun testWeeklyStepAggregation() {
+        val targetGoal = 10000L
+        val weeklySteps = listOf(8500L, 10200L, 11500L, 9400L, 12000L, 7800L, 10500L)
+        val totalSteps = weeklySteps.sum()
+        val dailyAvg = totalSteps / weeklySteps.size
+        val daysGoalMet = weeklySteps.count { it >= targetGoal }
+
+        assertEquals(69900L, totalSteps)
+        assertEquals(9985L, dailyAvg)
+        assertEquals(4, daysGoalMet)
+    }
+
+    @Test
+    fun testGoalPreferencesClamping() {
+        val minGoal = com.example.data.preferences.UserPreferencesManager.MIN_DAILY_GOAL
+        val maxGoal = com.example.data.preferences.UserPreferencesManager.MAX_DAILY_GOAL
+
+        val userEntryLow = 500L
+        val userEntryHigh = 75000L
+        val userEntryNormal = 12500L
+
+        val clampedLow = userEntryLow.coerceIn(minGoal, maxGoal)
+        val clampedHigh = userEntryHigh.coerceIn(minGoal, maxGoal)
+        val clampedNormal = userEntryNormal.coerceIn(minGoal, maxGoal)
+
+        assertEquals(1000L, clampedLow)
+        assertEquals(50000L, clampedHigh)
+        assertEquals(12500L, clampedNormal)
+    }
+
+    @Test
+    fun testEstimatedMetricsCalculation() {
+        val steps = 10000L
+        val distanceKm = steps * 0.000762
+        val calories = (steps * 0.04).toInt()
+        val activeMinutes = (steps / 100).toInt()
+
+        assertEquals(7.62, distanceKm, 0.001)
+        assertEquals(400, calories)
+        assertEquals(100, activeMinutes)
     }
 }

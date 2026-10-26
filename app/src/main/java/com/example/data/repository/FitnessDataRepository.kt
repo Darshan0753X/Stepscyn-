@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import android.content.Context
+import android.util.Log
 import com.example.data.local.AppDatabase
 import com.example.data.local.DailyStepDao
 import com.example.data.model.DailyStepRecord
@@ -17,13 +18,25 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlin.random.Random
 
+import com.example.data.preferences.UserPreferencesManager
+
 class FitnessDataRepository(
     private val context: Context,
-    private val dailyStepDao: DailyStepDao = AppDatabase.getDatabase(context).dailyStepDao(),
+    private val customDao: DailyStepDao? = null,
     val healthConnectManager: HealthConnectManager = HealthConnectManager(context)
 ) {
     private val scope = CoroutineScope(Dispatchers.IO)
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+    val preferencesManager: UserPreferencesManager by lazy { UserPreferencesManager(context) }
+
+    private val dailyStepDao: DailyStepDao? by lazy {
+        customDao ?: try {
+            AppDatabase.getDatabase(context).dailyStepDao()
+        } catch (e: Exception) {
+            Log.e("FitnessDataRepository", "Failed to get database: ${e.message}", e)
+            null
+        }
+    }
 
     private val _isDemoMode = MutableStateFlow(true)
     val isDemoMode: StateFlow<Boolean> = _isDemoMode.asStateFlow()
@@ -47,16 +60,30 @@ class FitnessDataRepository(
     init {
         scope.launch {
             loadStoredOrDemoData()
+            // Observe persisted step goal from DataStore preferences
+            preferencesManager.dailyStepGoalFlow.collect { persistedGoal ->
+                if (_todayRecord.value.goal != persistedGoal) {
+                    val updated = _todayRecord.value.copy(goal = persistedGoal)
+                    _todayRecord.value = updated
+                    try {
+                        dailyStepDao?.insertOrUpdate(updated)
+                    } catch (_: Exception) {}
+                }
+            }
         }
     }
 
     private suspend fun loadStoredOrDemoData() {
         val todayStr = LocalDate.now().format(dateFormatter)
-        val existing = dailyStepDao.getStepRecordSync(todayStr)
+        val existing = try {
+            dailyStepDao?.getStepRecordSync(todayStr)
+        } catch (_: Exception) {
+            null
+        }
+
         if (existing != null) {
             _todayRecord.value = existing
         } else {
-            // Seed initial demo data for 7 days so charts and streaks are populated on first launch
             seedInitialDemoHistory()
         }
         observeHistory()
@@ -66,7 +93,6 @@ class FitnessDataRepository(
         val today = LocalDate.now()
         val seeded = mutableListOf<DailyStepRecord>()
 
-        // 7 days history
         val sampleSteps = listOf(5420L, 6150L, 4900L, 5800L, 7200L, 6300L, 3850L)
         for (i in 6 downTo 0) {
             val date = today.minusDays(i.toLong())
@@ -81,7 +107,9 @@ class FitnessDataRepository(
                 lastSyncedAt = System.currentTimeMillis() - (i * 86400000L),
                 hourlyStepsString = hourly.joinToString(",")
             )
-            dailyStepDao.insertOrUpdate(record)
+            try {
+                dailyStepDao?.insertOrUpdate(record)
+            } catch (_: Exception) {}
             seeded.add(record)
         }
 
@@ -91,16 +119,21 @@ class FitnessDataRepository(
     }
 
     private fun observeHistory() {
+        val dao = dailyStepDao ?: return
         scope.launch {
-            dailyStepDao.getRecentDays(14).collect { list ->
-                if (list.isNotEmpty()) {
-                    _recentDays.value = list
-                    val todayStr = LocalDate.now().format(dateFormatter)
-                    val today = list.find { it.date == todayStr }
-                    if (today != null) {
-                        _todayRecord.value = today
+            try {
+                dao.getRecentDays(14).collect { list ->
+                    if (list.isNotEmpty()) {
+                        _recentDays.value = list
+                        val todayStr = LocalDate.now().format(dateFormatter)
+                        val today = list.find { it.date == todayStr }
+                        if (today != null) {
+                            _todayRecord.value = today
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                Log.w("FitnessDataRepository", "Error observing history: ${e.message}")
             }
         }
     }
@@ -126,7 +159,9 @@ class FitnessDataRepository(
                 lastSyncedAt = System.currentTimeMillis(),
                 hourlyStepsString = hourly.joinToString(",")
             )
-            dailyStepDao.insertOrUpdate(updated)
+            try {
+                dailyStepDao?.insertOrUpdate(updated)
+            } catch (_: Exception) {}
             _todayRecord.value = updated
 
             _syncStatus.value = SyncStatus(
@@ -147,8 +182,30 @@ class FitnessDataRepository(
         }
     }
 
-    suspend fun logManualSteps(steps: Long) {
+    suspend fun logHealthConnectSyncResult(steps: Long, hourly: List<Int>, timestamp: Long) {
         val todayStr = LocalDate.now().format(dateFormatter)
+        val updated = _todayRecord.value.copy(
+            stepCount = steps,
+            source = StepSource.HEALTH_CONNECT.name,
+            lastSyncedAt = timestamp,
+            hourlyStepsString = hourly.joinToString(",")
+        )
+        try {
+            dailyStepDao?.insertOrUpdate(updated)
+        } catch (_: Exception) {}
+        _todayRecord.value = updated
+
+        _syncStatus.value = SyncStatus(
+            isConnected = true,
+            lastSyncedAt = timestamp,
+            source = StepSource.HEALTH_CONNECT,
+            activeWatchName = "Health Connect (Live Synced)",
+            errorMessage = null
+        )
+        _isDemoMode.value = false
+    }
+
+    suspend fun logManualSteps(steps: Long) {
         val current = _todayRecord.value
         val newTotal = current.stepCount + steps
         val newHourly = current.getHourlySteps().toMutableList()
@@ -162,7 +219,9 @@ class FitnessDataRepository(
             hourlyStepsString = newHourly.joinToString(",")
         )
 
-        dailyStepDao.insertOrUpdate(updated)
+        try {
+            dailyStepDao?.insertOrUpdate(updated)
+        } catch (_: Exception) {}
         _todayRecord.value = updated
         _syncStatus.value = SyncStatus(
             isConnected = true,
@@ -175,10 +234,27 @@ class FitnessDataRepository(
 
     fun setDailyGoal(newGoal: Long) {
         scope.launch {
+            preferencesManager.setDailyStepGoal(newGoal)
             val updated = _todayRecord.value.copy(goal = newGoal)
-            dailyStepDao.insertOrUpdate(updated)
+            try {
+                dailyStepDao?.insertOrUpdate(updated)
+            } catch (_: Exception) {}
             _todayRecord.value = updated
         }
+    }
+
+    suspend fun updateWeeklyHistory(records: List<DailyStepRecord>) {
+        for (rec in records) {
+            try {
+                dailyStepDao?.insertOrUpdate(rec)
+            } catch (_: Exception) {}
+        }
+        val todayStr = LocalDate.now().format(dateFormatter)
+        val today = records.find { it.date == todayStr }
+        if (today != null) {
+            _todayRecord.value = today
+        }
+        _recentDays.value = records.sortedByDescending { it.date }
     }
 
     fun toggleDemoMode(enabled: Boolean) {
@@ -189,7 +265,6 @@ class FitnessDataRepository(
         )
     }
 
-    // Interactive tester for user preview: Simulate taking steps
     fun simulateStepsIncrement(additionalSteps: Long) {
         scope.launch {
             val current = _todayRecord.value
@@ -202,7 +277,9 @@ class FitnessDataRepository(
                 stepCount = newTotal,
                 hourlyStepsString = hourly.joinToString(",")
             )
-            dailyStepDao.insertOrUpdate(updated)
+            try {
+                dailyStepDao?.insertOrUpdate(updated)
+            } catch (_: Exception) {}
             _todayRecord.value = updated
         }
     }
