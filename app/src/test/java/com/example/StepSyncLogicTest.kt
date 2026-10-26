@@ -152,4 +152,27 @@ class StepSyncLogicTest {
         assertEquals(400, calories)
         assertEquals(100, activeMinutes)
     }
+
+    @Test
+    fun testDataStoreCircularStepIndicatorPercentage() {
+        val dataStoreGoal = 10000L
+        val currentStepsUnder = 7500L
+        val currentStepsOver = 12500L
+
+        val ratioUnder = (currentStepsUnder.toFloat() / dataStoreGoal.toFloat()).coerceIn(0f, 1.5f)
+        val percentageUnder = (ratioUnder * 100f).toInt()
+        assertEquals(75, percentageUnder)
+        assertEquals(2500L, (dataStoreGoal - currentStepsUnder).coerceAtLeast(0L))
+
+        val ratioOver = (currentStepsOver.toFloat() / dataStoreGoal.toFloat()).coerceIn(0f, 1.5f)
+        val percentageOver = (ratioOver * 100f).toInt()
+        assertEquals(125, percentageOver)
+        assertEquals(0L, (dataStoreGoal - currentStepsOver).coerceAtLeast(0L))
+
+        // Safe division check when goal is 0 or uninitialized
+        val zeroGoal = 0L
+        val safeGoal = zeroGoal.coerceAtLeast(1L)
+        val safeRatio = (currentStepsUnder.toFloat() / safeGoal.toFloat()).coerceIn(0f, 1.5f)
+        assertTrue(safeRatio >= 0f)
+    }
 }

@@ -87,6 +87,7 @@ import com.example.data.preferences.UserPreferencesManager
 import com.example.data.repository.FitnessDataRepository
 import com.example.health.HealthConnectSyncService
 import com.example.health.HealthSyncState
+import com.example.ui.components.DataStoreCircularStepIndicator
 import com.example.ui.theme.CyberLime
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.DarkBorder
@@ -248,6 +249,38 @@ fun SettingsScreen(
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            // Live DataStore Circular Progress Indicator Preview
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "LIVE DATASTORE GOAL PROGRESS",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                color = CyberLime,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        DataStoreCircularStepIndicator(
+                            fitnessRepository = fitnessRepository,
+                            size = 190.dp,
+                            strokeWidth = 14.dp
+                        )
                     }
                 }
             }

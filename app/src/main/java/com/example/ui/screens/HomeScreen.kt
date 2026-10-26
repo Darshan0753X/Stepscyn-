@@ -62,6 +62,7 @@ import com.example.data.repository.FitnessDataRepository
 import com.example.data.repository.SocialCompetitionRepository
 import com.example.ui.components.ActivityBarChart
 import com.example.ui.components.CircularStepRing
+import com.example.ui.components.DataStoreCircularStepIndicator
 import com.example.ui.components.HeadToHeadCard
 import com.example.ui.components.WatchStatusCard
 import com.example.ui.components.WeeklyStepBarChart
@@ -204,20 +205,12 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Main Hero Circular Progress Ring (Tappable to view detailed progress indicators)
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(24.dp))
-                    .clickable { onNavigateToGoalProgress() }
-                    .padding(4.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularStepRing(
-                    currentSteps = todayRecord.stepCount,
-                    goal = todayRecord.goal,
-                    streak = userProfile.currentStreak
-                )
-            }
+            // Main Hero Circular Progress Ring (visualizes current percentage toward DataStore step goal)
+            DataStoreCircularStepIndicator(
+                fitnessRepository = fitnessRepository,
+                streakDays = userProfile.currentStreak,
+                onClick = onNavigateToGoalProgress
+            )
 
             Spacer(modifier = Modifier.height(10.dp))
 

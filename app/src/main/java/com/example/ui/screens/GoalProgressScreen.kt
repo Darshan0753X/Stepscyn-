@@ -88,6 +88,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.repository.FitnessDataRepository
 import com.example.data.repository.SocialCompetitionRepository
 import com.example.health.HealthConnectSyncService
+import com.example.ui.components.DataStoreCircularStepIndicator
 import com.example.ui.theme.CyberLime
 import com.example.ui.theme.DarkBg
 import com.example.ui.theme.DarkBorder
@@ -279,11 +280,10 @@ fun GoalProgressScreen(
                 ) {
                     when (indicatorStyle) {
                         IndicatorStyle.CIRCULAR -> {
-                            StepProgressCircle(
-                                currentSteps = currentSteps,
-                                goal = dailyGoal,
-                                progressRatio = progressRatio,
-                                isGoalAchieved = isGoalAchieved
+                            DataStoreCircularStepIndicator(
+                                fitnessRepository = fitnessRepository,
+                                size = 250.dp,
+                                onClick = onNavigateToSettings
                             )
                         }
                         IndicatorStyle.LINEAR -> {
@@ -295,12 +295,10 @@ fun GoalProgressScreen(
                             )
                         }
                         IndicatorStyle.SPLIT -> {
-                            StepProgressCircle(
-                                currentSteps = currentSteps,
-                                goal = dailyGoal,
-                                progressRatio = progressRatio,
-                                isGoalAchieved = isGoalAchieved,
-                                size = 200.dp
+                            DataStoreCircularStepIndicator(
+                                fitnessRepository = fitnessRepository,
+                                size = 200.dp,
+                                onClick = onNavigateToSettings
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             StepProgressLinear(

@@ -229,7 +229,35 @@ class StepSyncApplication : Application() {
           echo "Generated APK files:" >> $GITHUB_STEP_SUMMARY
           ls -la app/build/outputs/apk/debug/ >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload Debug APK Artifact
+      - name: Package APK into ZIP Archive
+        run: |
+          mkdir -p release_package
+          cp app/build/outputs/apk/debug/*.apk release_package/StepSync-debug.apk
+          cat << 'EOF' > release_package/INSTALL_INSTRUCTIONS.txt
+StepSync Android App (Debug Build)
+==================================
+Installation Guide:
+1. Transfer 'StepSync-debug.apk' to your Android device via USB, Drive, or direct download.
+2. Open your device's File Manager and tap 'StepSync-debug.apk'.
+3. If prompted, allow "Install unknown apps" for your browser or file manager.
+4. Launch StepSync!
+EOF
+          cd release_package
+          zip -9 -r ../StepSync-v1.0-APK.zip StepSync-debug.apk INSTALL_INSTRUCTIONS.txt
+          cd ..
+          ls -lh StepSync-v1.0-APK.zip
+          echo "### 📦 ZIP Package Created Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "File: StepSync-v1.0-APK.zip ($(ls -lh StepSync-v1.0-APK.zip | awk '{print $5}'))" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload ZIP Package Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StepSync-v1.0-APK-ZIP
+          path: StepSync-v1.0-APK.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Raw Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: StepSync-Debug-APK
