@@ -9,9 +9,9 @@ on:
 
 jobs:
   build:
-    name: Build Debug APK
+    name: Build Debug APK & ZIP Package
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Checkout Repository
@@ -23,161 +23,15 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Accept Android SDK Licenses
+      - name: Set up Android SDK
         run: |
-          mkdir -p "$ANDROID_HOME/licenses"
-          printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n" > "$ANDROID_HOME/licenses/android-sdk-license"
-          printf "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$ANDROID_HOME/licenses/android-sdk-preview-license"
-
-      - name: Align SDK, Dependencies and Resources
-        run: |
-          python3 -c '
-          import re, os
-
-          # 1. Align libs.versions.toml to stable coreKtx 1.15.0
-          if os.path.isfile("gradle/libs.versions.toml"):
-              with open("gradle/libs.versions.toml", "r") as f:
-                  toml = f.read()
-              toml = re.sub(r"coreKtx\s*=\s*[\"0-9\.]+", "coreKtx = \"1.15.0\"", toml)
-              with open("gradle/libs.versions.toml", "w") as f:
-                  f.write(toml)
-              print("[OK] gradle/libs.versions.toml verified")
-
-          # 2. Align app/build.gradle.kts to compileSdk 35 and targetSdk 35
-          if os.path.isfile("app/build.gradle.kts"):
-              with open("app/build.gradle.kts", "r") as f:
-                  kts = f.read()
-              kts = re.sub(r"compileSdk\s*\{[^}]*\}", "compileSdk = 35", kts)
-              kts = re.sub(r"compileSdk\s*=\s*\d+", "compileSdk = 35", kts)
-              kts = re.sub(r"targetSdk\s*=\s*\d+", "targetSdk = 35", kts)
-              with open("app/build.gradle.kts", "w") as f:
-                  f.write(kts)
-              print("[OK] app/build.gradle.kts verified")
-
-          # 3. Inject fallback string resources into strings.xml if missing
-          strings_path = "app/src/main/res/values/strings.xml"
-          if os.path.isfile(strings_path):
-              with open(strings_path, "r") as f:
-                  s = f.read()
-              if "default_web_client_id" not in s:
-                  s = s.replace("</resources>", "    <string name=\"default_web_client_id\">587849588879-tj00eop7iob5duvjcfsmg2bkpns3jcgt.apps.googleusercontent.com</string>\n</resources>")
-                  with open(strings_path, "w") as f:
-                      f.write(s)
-                  print("[OK] Injected fallback strings into strings.xml")
-
-          # 4. Patch R.string unresolved references in AuthManager and SocialCompetitionRepository
-          auth_path = "app/src/main/java/com/example/auth/AuthManager.kt"
-          if os.path.isfile(auth_path):
-              with open(auth_path, "r") as f:
-                  code = f.read()
-              if "R.string.default_web_client_id" in code:
-                  code = code.replace("context.getString(R.string.default_web_client_id)", "(\"587849588879-tj00eop7iob5duvjcfsmg2bkpns3jcgt.apps.googleusercontent.com\")")
-                  with open(auth_path, "w") as f:
-                      f.write(code)
-                  print("[OK] Patched AuthManager.kt")
-
-          repo_path = "app/src/main/java/com/example/data/repository/SocialCompetitionRepository.kt"
-          if os.path.isfile(repo_path):
-              with open(repo_path, "r") as f:
-                  code = f.read()
-              if "R.string.firestore_database_id" in code:
-                  code = code.replace("context.getString(R.string.firestore_database_id)", "(\"(default)\")")
-                  with open(repo_path, "w") as f:
-                      f.write(code)
-                  print("[OK] Patched SocialCompetitionRepository.kt")
-
-          # 5. Ensure all Compose screens have items import if using items()
-          if os.path.isdir("app/src/main/java"):
-              for root, dirs, files in os.walk("app/src/main/java"):
-                  for file in files:
-                      if file.endswith(".kt"):
-                          fpath = os.path.join(root, file)
-                          with open(fpath, "r") as f:
-                              content = f.read()
-                          if "items(" in content and "import androidx.compose.foundation.lazy.items" not in content:
-                              content = re.sub(
-                                  r"(import androidx\.compose\.foundation\.lazy\.LazyColumn)",
-                                  r"\1\nimport androidx.compose.foundation.lazy.items",
-                                  content
-                              )
-          # 6. Ensure StepSyncApplication and FirebaseHelper exist and manifest is registered
-          helper_path = "app/src/main/java/com/example/auth/FirebaseHelper.kt"
-          if not os.path.isfile(helper_path):
-              os.makedirs("app/src/main/java/com/example/auth", exist_ok=True)
-              with open(helper_path, "w") as f:
-                  f.write('''package com.example.auth
-
-import android.content.Context
-import android.util.Log
-import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
-
-object FirebaseHelper {
-    @Volatile
-    private var initialized = false
-
-    fun initialize(context: Context) {
-        if (initialized) return
-        synchronized(this) {
-            if (initialized) return
-            try {
-                val appContext = context.applicationContext ?: context
-                if (FirebaseApp.getApps(appContext).isEmpty()) {
-                    try { FirebaseApp.initializeApp(appContext) } catch (_: Exception) {}
-                    if (FirebaseApp.getApps(appContext).isEmpty()) {
-                        val options = FirebaseOptions.Builder()
-                            .setApplicationId("1:587849588879:android:8143c38392b0e52f4c50fa")
-                            .setProjectId("gen-lang-client-0275946414")
-                            .setApiKey("AIzaSyAubabzAITvDiUkeUpQrs6htoDmOm2ImNk")
-                            .setStorageBucket("gen-lang-client-0275946414.firebasestorage.app")
-                            .setGcmSenderId("587849588879")
-                            .build()
-                        FirebaseApp.initializeApp(appContext, options)
-                    }
-                }
-                initialized = true
-            } catch (e: Exception) {
-                Log.e("FirebaseHelper", "Init error: ${e.message}")
-            }
-        }
-    }
-}
-''')
-              print("[OK] Verified FirebaseHelper.kt")
-
-          app_class = "app/src/main/java/com/example/StepSyncApplication.kt"
-          if not os.path.isfile(app_class):
-              with open(app_class, "w") as f:
-                  f.write('''package com.example
-
-import android.app.Application
-import android.util.Log
-import com.example.auth.FirebaseHelper
-
-class StepSyncApplication : Application() {
-    override fun onCreate() {
-        super.onCreate()
-        try {
-            FirebaseHelper.initialize(this)
-            Log.i("StepSyncApplication", "Firebase initialized at launch")
-        } catch (e: Exception) {
-            Log.e("StepSyncApplication", "Init failed: ${e.message}")
-        }
-    }
-}
-''')
-              print("[OK] Verified StepSyncApplication.kt")
-
-          manifest_file = "app/src/main/AndroidManifest.xml"
-          if os.path.isfile(manifest_file):
-              with open(manifest_file, "r") as f:
-                  mf = f.read()
-              if 'android:name=".StepSyncApplication"' not in mf:
-                  mf = mf.replace("<application", '<application\\n        android:name=".StepSyncApplication"')
-                  with open(manifest_file, "w") as f:
-                      f.write(mf)
-                  print("[OK] Registered StepSyncApplication in manifest")
-          '
+          SDK_DIR="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          if [ -d "$SDK_DIR" ]; then
+            echo "ANDROID_HOME=$SDK_DIR" >> $GITHUB_ENV
+            mkdir -p "$SDK_DIR/licenses" 2>/dev/null || true
+            printf "24333f8a63b6825ea9c5514f83c2829b004d1fee\nd56f5187479451eabf01fb78af6dfcb131a6481e\n" > "$SDK_DIR/licenses/android-sdk-license" 2>/dev/null || true
+            printf "84831b9409646a918e30573bab4c9c91346d8abd\n" > "$SDK_DIR/licenses/android-sdk-preview-license" 2>/dev/null || true
+          fi
 
       - name: Prepare Secrets and Keystore
         run: |
@@ -190,9 +44,9 @@ class StepSyncApplication : Application() {
             fi
           fi
 
-          # 2. Materialize debug.keystore
+          # 2. Materialize debug.keystore from base64 if present
           if [ -s debug.keystore.base64 ]; then
-            base64 -d debug.keystore.base64 > debug.keystore || true
+            base64 -d debug.keystore.base64 > debug.keystore 2>/dev/null || base64 --decode debug.keystore.base64 > debug.keystore 2>/dev/null || true
           fi
 
           # 3. Fallback: generate standard debug keystore if missing or empty
@@ -204,52 +58,59 @@ class StepSyncApplication : Application() {
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
 
       - name: Grant Execute Permission to Gradlew
-        run: chmod +x gradlew
+        run: chmod +x gradlew || true
 
       - name: Build Debug APK
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace --console=plain > build.log 2>&1 || {
-            STATUS=$?
+          ./gradlew assembleDebug --no-daemon --stacktrace --console=plain --no-configuration-cache 2>&1 | tee build.log
+          STATUS=${PIPESTATUS[0]}
+          if [ $STATUS -ne 0 ]; then
             echo "## ❌ Gradle Build Failed (Exit Code: $STATUS)" >> $GITHUB_STEP_SUMMARY
-            echo "### Detailed Compiler Errors:" >> $GITHUB_STEP_SUMMARY
+            echo "### Compiler Errors:" >> $GITHUB_STEP_SUMMARY
             echo '```text' >> $GITHUB_STEP_SUMMARY
             grep -E "e: |FAILURE:|What went wrong:|Compilation error|\* Exception is:|Caused by:" build.log -A 10 -B 2 >> $GITHUB_STEP_SUMMARY || true
             echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "### Last 100 Lines of Build Log:" >> $GITHUB_STEP_SUMMARY
-            echo '```text' >> $GITHUB_STEP_SUMMARY
-            tail -n 100 build.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            cat build.log
             exit $STATUS
-          }
-          cat build.log
+          fi
           echo "### ✅ Build Succeeded!" >> $GITHUB_STEP_SUMMARY
-          echo "Generated APK files:" >> $GITHUB_STEP_SUMMARY
-          ls -la app/build/outputs/apk/debug/ >> $GITHUB_STEP_SUMMARY
 
       - name: Package APK into ZIP Archive
         run: |
           mkdir -p release_package
-          cp app/build/outputs/apk/debug/*.apk release_package/StepSync-debug.apk
+          # Find generated debug APK safely
+          APK_FILE=$(find app/build/outputs/apk/debug/ -name "*.apk" | head -n 1)
+          if [ -z "$APK_FILE" ] || [ ! -f "$APK_FILE" ]; then
+            echo "❌ No APK found in app/build/outputs/apk/debug/"
+            exit 1
+          fi
+
+          echo "Found APK: $APK_FILE"
+          cp "$APK_FILE" release_package/StepSync-debug.apk
+
           cat << 'EOF' > release_package/INSTALL_INSTRUCTIONS.txt
-StepSync Android App (Debug Build)
-==================================
+StepSync Android Application (Debug Build)
+=========================================
 Installation Guide:
-1. Transfer 'StepSync-debug.apk' to your Android device via USB, Drive, or direct download.
+1. Transfer 'StepSync-debug.apk' to your Android device via USB, Google Drive, or direct download.
 2. Open your device's File Manager and tap 'StepSync-debug.apk'.
-3. If prompted, allow "Install unknown apps" for your browser or file manager.
-4. Launch StepSync!
+3. Allow "Install from unknown sources" or "Install unknown apps" if prompted.
+4. Launch StepSync and sync with Google Health Connect or Samsung Galaxy Fit3!
 EOF
+
           cd release_package
           zip -9 -r ../StepSync-v1.0-APK.zip StepSync-debug.apk INSTALL_INSTRUCTIONS.txt
           cd ..
-          ls -lh StepSync-v1.0-APK.zip
-          echo "### 📦 ZIP Package Created Successfully!" >> $GITHUB_STEP_SUMMARY
-          echo "File: StepSync-v1.0-APK.zip ($(ls -lh StepSync-v1.0-APK.zip | awk '{print $5}'))" >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload ZIP Package Artifact
+          ZIP_SIZE=$(ls -lh StepSync-v1.0-APK.zip | awk '{print $5}')
+          echo "### 📦 ZIP Package Created Successfully!" >> $GITHUB_STEP_SUMMARY
+          echo "- **Archive**: \`StepSync-v1.0-APK.zip\` ($ZIP_SIZE)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Contained APK**: \`StepSync-debug.apk\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload APK ZIP Package Artifact
         uses: actions/upload-artifact@v4
         with:
           name: StepSync-v1.0-APK-ZIP
@@ -261,6 +122,6 @@ EOF
         uses: actions/upload-artifact@v4
         with:
           name: StepSync-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: release_package/StepSync-debug.apk
           if-no-files-found: error
           retention-days: 14
